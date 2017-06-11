@@ -2,6 +2,7 @@
 #include "utils.h"
 #include "blas.h"
 #include "cuda.h"
+#include <hiredis.h>
 #include <stdio.h>
 #include <math.h>
 
@@ -11,6 +12,8 @@
 #include "stb_image_write.h"
 
 int windows = 0;
+redisContext *redis;
+struct timeval timeout = { 1, 500000 };
 
 float colors[6][3] = { {1,0,1}, {0,0,1},{0,1,1},{0,1,0},{1,1,0},{1,0,0} };
 
@@ -175,6 +178,16 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
 {
     int i;
 
+    redis = redisConnectWithTimeout("localhost", 6379, timeout);
+    if (redis == NULL || redis->err) {
+        if (redis) {
+            printf("Connection error: %s\n", redis->errstr);
+            redisFree(redis);
+        } else {
+            printf("Connection error: can't allocate redis context\n");
+        }
+        exit(1);
+    }
     for(i = 0; i < num; ++i){
         int class = max_index(probs[i], classes);
         float prob = probs[i][class];
@@ -216,10 +229,18 @@ void draw_detections(image im, int num, float thresh, box *boxes, float **probs,
             if (alphabet) {
                 image label = get_label(alphabet, names[class], (im.h*.03)/10);
                 draw_label(im, top + width, left, label, rgb);
+		printf("%s, %d, %d, %d, %d \n", names[class], left, right, top, bot);
+                redisReply *reply;
+    		//reply = redisCommand(redis,"SETEX %s 5 %d,%d,%d,%d", names[class], left, right, top, bot);
+		//reply = redisCommand(redis,"SET %s  %d,%d,%d,%d", names[class], left,top, right, bot);
+		reply = redisCommand(redis,"SETEX %s 1 %d,%d,%d", names[class], left + (right-left)/2,top + (bot - top)/2,(right-left)*(bot-top));
+		printf("redis: %s", reply->str);	
+		freeReplyObject(reply);
                 free_image(label);
             }
         }
     }
+  redisFree(redis);
 }
 
 void transpose_image(image im)
